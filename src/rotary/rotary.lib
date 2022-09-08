@@ -1,0 +1,73 @@
+/*
+ * Rotating speaker simulator
+ *
+ * Naive implementation of Leslie speaker. This is pretty much perceptual
+ * model viewed as a multiband set of
+ * frequency and amplitude modulators in various combinations.
+ *
+ * The algorithm is based on NI Reaktor "I wanna be 122" ensemble
+ * by Tim Schwerdtfeger (available at
+ * https://www.native-instruments.com/en/reaktor-community/reaktor-user-library/entry/show/1839/).
+ */
+
+declare name "Rotary";
+declare author "Marek Wiewiorski";
+declare version "0.5";
+declare license "MIT";
+
+import("stdfaust.lib");
+
+
+xover_treble = _
+  : fi.svf.hp(1144, 0.5)
+  : fi.peak_eq_cq(18, 2000, 0.5)
+  : fi.highshelf(1, 4, 932)
+  : fi.svf.lp(6000, 0.5) : fi.svf.lp(12000, 0.5);
+
+xover_bass = _
+  : fi.lowshelf(1, -4, 100)
+  : fi.peak_eq_cq(13, 245, 0.6)
+  : fi.svf.lp(700, 0.6);
+
+
+distance = 0.25;
+dmax = 2048;
+
+ms2samp(ms) = ba.sec2samp(ms * 0.001);
+
+dly(dtime) = de.fdelay(dmax, ms2samp(dtime));
+
+osc_lfo(f, p) = os.oscp(f, p);
+
+horn = horn_ch with {
+  lfo = osc_lfo(5.53, 0);
+
+  am_distance = lfo * distance + 1;
+  fm1 = dly(0.56 + lfo * 0.5);
+  fm2 = dly(1.3 + lfo * -0.2);
+
+  filter = fi.svf.lp(417, 1.1);
+  am_filter = filter * (lfo-1);
+
+  am_filter_mix = _ <: _ + am_filter;
+
+  path1 = _ <: (fm1 + am_filter_mix) * am_distance;
+  path2 = am_filter_mix : fm2;
+
+  horn_ch = _ <: path1 + path2;
+};
+
+rotor = rotor_ch with {
+  lfo = osc_lfo(6.12, 0);
+
+  dtime = 0.5 + lfo * 0.4;
+  fm1 = dly(dtime);
+  fm2 = dly(0.8 * dtime);
+
+  path1 = _ <: (fm1 + fm2) * (1 + 0.5 * lfo);
+  path2 = dly(1.3 + -0.2 * lfo);
+
+  rotor_ch = _ <: path1 + path2;
+};
+
+rotary = 0.06 * _  <: xover_bass, xover_treble : rotor, horn : +;
